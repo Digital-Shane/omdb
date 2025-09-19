@@ -15,13 +15,13 @@ const (
 	DefaultURL = "http://www.omdbapi.com/"
 )
 
-//Client is a omdb client.
+// Client is a omdb client.
 type Client struct {
 	apiKey     string
 	httpClient *http.Client
 }
 
-//NewClient creates a new omdb Client.
+// NewClient creates a new omdb Client.
 func NewClient(key string, client *http.Client) *Client {
 	return &Client{
 		apiKey:     key,
@@ -29,7 +29,7 @@ func NewClient(key string, client *http.Client) *Client {
 	}
 }
 
-//requestOmdbAPI will call the OMDB API
+// requestOmdbAPI will call the OMDB API
 func (c *Client) requestOmdbAPI(params url.Values) (*http.Response, error) {
 
 	if c.httpClient == nil {
@@ -64,9 +64,9 @@ func (c *Client) requestOmdbAPI(params url.Values) (*http.Response, error) {
 	return res, nil
 }
 
-//SearchByImdbID performs an API search for a specified movie or series or episode by
-//the specific imdb id. Although OMDB API allows passing other parameters like Year, SearchType etc
-//but they are ignored here as search is done on a unique id.
+// SearchByImdbID performs an API search for a specified movie or series or episode by
+// the specific imdb id. Although OMDB API allows passing other parameters like Year, SearchType etc
+// but they are ignored here as search is done on a unique id.
 func (c *Client) SearchByImdbID(q QueryData) (interface{}, error) {
 
 	if q.ImdbID == "" {
@@ -75,6 +75,9 @@ func (c *Client) SearchByImdbID(q QueryData) (interface{}, error) {
 
 	params := url.Values{}
 	params.Add("i", q.ImdbID)
+	if err := addSeasonEpisodeParams(params, q); err != nil {
+		return nil, err
+	}
 
 	res, err := c.requestOmdbAPI(params)
 	if err != nil {
@@ -124,16 +127,27 @@ func (c *Client) SearchByImdbID(q QueryData) (interface{}, error) {
 			return nil, err
 		}
 		val = episode
+
+	default:
+		season := SeasonResult{}
+		err = json.Unmarshal(data, &season)
+		if err != nil {
+			return nil, err
+		}
+		if season.Title == "" && len(season.Episodes) == 0 {
+			return nil, errors.New("omdb: unable to parse response from OMDB API")
+		}
+		val = season
 	}
 
 	return val, nil
 }
 
-//SearchByTitle performs an API search for a specified movie or series or episode by
-//the specific title.
-//Currently OMDB API seems to be returning only movie information, on a title
-//based search. Year parameter has to be greater tha nor equal to 1888 (trivia: which
-//is the world's earliest surviving motion-picture film?)
+// SearchByTitle performs an API search for a specified movie or series or episode by
+// the specific title.
+// Currently OMDB API seems to be returning only movie information, on a title
+// based search. Year parameter has to be greater tha nor equal to 1888 (trivia: which
+// is the world's earliest surviving motion-picture film?)
 func (c *Client) SearchByTitle(q QueryData) (interface{}, error) {
 
 	params := url.Values{}
@@ -168,6 +182,10 @@ func (c *Client) SearchByTitle(q QueryData) (interface{}, error) {
 	}
 	if q.Plot != "" {
 		params.Add("plot", q.Plot)
+	}
+
+	if err := addSeasonEpisodeParams(params, q); err != nil {
+		return nil, err
 	}
 
 	res, err := c.requestOmdbAPI(params)
@@ -218,13 +236,24 @@ func (c *Client) SearchByTitle(q QueryData) (interface{}, error) {
 			return nil, err
 		}
 		val = episode
+
+	default:
+		season := SeasonResult{}
+		err = json.Unmarshal(data, &season)
+		if err != nil {
+			return nil, err
+		}
+		if season.Title == "" && len(season.Episodes) == 0 {
+			return nil, errors.New("omdb: unable to parse response from OMDB API")
+		}
+		val = season
 	}
 
 	return val, nil
 }
 
-//SearchByText performs an API search based on given text and return a SearchResponse
-//struct.
+// SearchByText performs an API search based on given text and return a SearchResponse
+// struct.
 func (c *Client) SearchByText(q QueryData) (*SearchResponse, error) {
 
 	params := url.Values{}
@@ -289,4 +318,25 @@ func (c *Client) SearchByText(q QueryData) (*SearchResponse, error) {
 	}
 
 	return &searchresponse, nil
+}
+
+func addSeasonEpisodeParams(params url.Values, q QueryData) error {
+	if q.Season != "" {
+		if _, err := strconv.Atoi(q.Season); err != nil {
+			return errors.New("omdb: Season should be either blank or a valid number")
+		}
+		params.Set("Season", q.Season)
+	}
+
+	if q.Episode != "" {
+		if q.Season == "" {
+			return errors.New("omdb: Episode requires Season to be specified")
+		}
+		if _, err := strconv.Atoi(q.Episode); err != nil {
+			return errors.New("omdb: Episode should be either blank or a valid number")
+		}
+		params.Set("Episode", q.Episode)
+	}
+
+	return nil
 }
